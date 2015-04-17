@@ -1,6 +1,6 @@
 ﻿/*
 TShock, a server mod for Terraria
-Copyright (C) 2011-2012 The TShock Team
+Copyright (C) 2011-2015 Nyx Studios (fka. The TShock Team)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -23,7 +24,9 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Terraria;
+using TShockAPI.DB;
 
 namespace TShockAPI
 {
@@ -32,17 +35,17 @@ namespace TShockAPI
 	/// </summary>
 	public class Utils
 	{
-	    /// <summary>
-	    /// The lowest id for a prefix.
-	    /// </summary>
-	    private const int FirstItemPrefix = 1;
+		/// <summary>
+		/// The lowest id for a prefix.
+		/// </summary>
+		private const int FirstItemPrefix = 1;
 
-	    /// <summary>
-	    /// The highest id for a prefix.
-	    /// </summary>
-	    private const int LastItemPrefix = 83;
+		/// <summary>
+		/// The highest id for a prefix.
+		/// </summary>
+		private const int LastItemPrefix = 83;
 
-	    // Utils is a Singleton
+		// Utils is a Singleton
 		private static readonly Utils instance = new Utils();
 		private Utils() {}
 		public static Utils Instance { get { return instance; } }
@@ -61,77 +64,31 @@ namespace TShockAPI
 		}
 
 		/// <summary>
-		/// Used for some places where a list of players might be used.
+		/// Returns a list of current players on the server
 		/// </summary>
-		/// <returns>String of players seperated by commas.</returns>
-        [Obsolete("Use GetPlayers and manually create strings. This should never have been kept as far as actual functions go.")]
-		public string GetPlayers()
+		/// <param name="includeIDs">bool includeIDs - whether or not the string of each player name should include ID data</param>
+		/// <returns>List of strings with names</returns>
+		public List<string> GetPlayers(bool includeIDs)
 		{
-			var sb = new StringBuilder();
-			foreach (TSPlayer player in TShock.Players)
+			var players = new List<string>();
+
+			foreach (TSPlayer ply in TShock.Players)
 			{
-				if (player != null && player.Active)
-				{
-					if (sb.Length != 0)
+					if (ply != null && ply.Active)
 					{
-						sb.Append(", ");
+							if (includeIDs)
+							{
+									players.Add(ply.Name + " (IX: " + ply.Index + ", ID: " + ply.UserID + ")");
+							}
+							else
+							{
+									players.Add(ply.Name);
+							}
 					}
-					sb.Append(player.Name);
-				}
 			}
-			return sb.ToString();
+
+			return players;
 		}
-
-        /// <summary>
-        /// Returns a list of current players on the server
-        /// </summary>
-        /// <param name="includeIDs">bool includeIDs - whether or not the string of each player name should include ID data</param>
-        /// <returns>List of strings with names</returns>
-        public List<string> GetPlayers(bool includeIDs)
-        {
-            var players = new List<string>();
-
-            foreach (TSPlayer ply in TShock.Players)
-            {
-                if (ply != null && ply.Active)
-                {
-                    if (includeIDs)
-                    {
-                        players.Add(ply.Name + " (IX: " + ply.Index + ", ID: " + ply.UserID + ")");
-                    }
-                    else
-                    {
-                        players.Add(ply.Name);
-                    }
-                }
-            }
-
-            return players;
-        }
-
-        /// <summary>
-        /// Used for some places where a list of players might be used.
-        /// </summary>
-        /// <returns>String of players and their id seperated by commas.</returns>
-        [Obsolete("Use GetPlayers and manually create strings. This should never have been kept as far as actual functions go.")]
-        public string GetPlayersWithIds()
-        {
-            var sb = new StringBuilder();
-            foreach (TSPlayer player in TShock.Players)
-            {
-                if (player != null && player.Active)
-                {
-                    if (sb.Length != 0)
-                    {
-                        sb.Append(", ");
-                    }
-                    sb.Append(player.Name);
-                    string id = "(ID: " + Convert.ToString(TShock.Users.GetUserID(player.UserAccountName)) + ", IX:" + player.Index + ")";
-                    sb.Append(id);
-                }
-            }
-            return sb.ToString();
-        }
 
 		/// <summary>
 		/// Finds a player and gets IP as string
@@ -179,21 +136,11 @@ namespace TShockAPI
 			SaveManager.Instance.SaveWorld();
 		}
 
-		/// <summary>
-		/// Broadcasts a message to all players
-		/// </summary>
-		/// <param name="msg">string message</param>
-		[Obsolete("Use TSPlayer.All and send a message via that method rather than using Broadcast.")]
-		public void Broadcast(string msg)
-		{
-			Broadcast(msg, Color.Green);
-		}
-
 		public void Broadcast(string msg, byte red, byte green, byte blue)
 		{
 			TSPlayer.All.SendMessage(msg, red, green, blue);
 			TSPlayer.Server.SendMessage(msg, red, green, blue);
-			Log.Info(string.Format("Broadcast: {0}", msg));
+			TShock.Log.Info(string.Format("Broadcast: {0}", msg));
 		}
 
 		public void Broadcast(string msg, Color color)
@@ -201,34 +148,35 @@ namespace TShockAPI
 			Broadcast(msg, color.R, color.G, color.B);
 		}
 
-        /// <summary>
-        /// Broadcasts a message from a player, not TShock
-        /// </summary>
-        /// <param name="ply">TSPlayer ply - the player that will send the packet</param>
-        /// <param name="msg">string msg - the message</param>
-        /// <param name="red">r</param>
-        /// <param name="green">g</param>
-        /// <param name="blue">b</param>
-        public void Broadcast(int ply, string msg, byte red, byte green, byte blue)
-        {
-            TSPlayer.All.SendMessageFromPlayer(msg, red, green, blue, ply);
-            TSPlayer.Server.SendMessage(Main.player[ply].name + ": " + msg, red, green, blue);
-            Log.Info(string.Format("Broadcast: {0}", Main.player[ply].name + ": " + msg));
-        }
+		/// <summary>
+		/// Broadcasts a message from a player, not TShock
+		/// </summary>
+		/// <param name="ply">TSPlayer ply - the player that will send the packet</param>
+		/// <param name="msg">string msg - the message</param>
+		/// <param name="red">r</param>
+		/// <param name="green">g</param>
+		/// <param name="blue">b</param>
+		public void Broadcast(int ply, string msg, byte red, byte green, byte blue)
+		{
+			TSPlayer.All.SendMessageFromPlayer(msg, red, green, blue, ply);
+			TSPlayer.Server.SendMessage(Main.player[ply].name + ": " + msg, red, green, blue);
+			TShock.Log.Info(string.Format("Broadcast: {0}", Main.player[ply].name + ": " + msg));
+		}
 
 		/// <summary>
-		/// Sends message to all users with 'logs' permission.
+		/// Sends message to all players with 'logs' permission.
 		/// </summary>
 		/// <param name="log">Message to send</param>
 		/// <param name="color">Color of the message</param>
-		public void SendLogs(string log, Color color)
+		/// <param name="excludedPlayer">The player to not send the message to.</param>
+		public void SendLogs(string log, Color color, TSPlayer excludedPlayer = null)
 		{
-			Log.Info(log);
+			TShock.Log.Info(log);
 			TSPlayer.Server.SendMessage(log, color);
 			foreach (TSPlayer player in TShock.Players)
 			{
-				if (player != null && player.Active && player.Group.HasPermission(Permissions.logs) && player.DisplayLogs &&
-				    TShock.Config.DisableSpewLogs == false)
+				if (player != null && player != excludedPlayer && player.Active && player.Group.HasPermission(Permissions.logs) && 
+						player.DisplayLogs && TShock.Config.DisableSpewLogs == false)
 					player.SendMessage(log, color);
 			}
 		}
@@ -255,7 +203,7 @@ namespace TShockAPI
 				return found;
 
 			byte plrID;
-			if (byte.TryParse(plr, out plrID))
+			if (byte.TryParse(plr, out plrID) && plrID < Main.maxPlayers)
 			{
 				TSPlayer player = TShock.Players[plrID];
 				if (player != null && player.Active)
@@ -289,7 +237,7 @@ namespace TShockAPI
 		/// <param name="tileX">X location</param>
 		/// <param name="tileY">Y location</param>
 		public void GetRandomClearTileWithInRange(int startTileX, int startTileY, int tileXRange, int tileYRange,
-		                                          out int tileX, out int tileY)
+																							out int tileX, out int tileY)
 		{
 			int j = 0;
 			do
@@ -304,29 +252,31 @@ namespace TShockAPI
 				tileX = startTileX + Random.Next(tileXRange*-1, tileXRange);
 				tileY = startTileY + Random.Next(tileYRange*-1, tileYRange);
 				j++;
-			} while (TileValid(tileX, tileY) && !TileClear(tileX, tileY));
+			} while (TilePlacementValid(tileX, tileY) && TileSolid(tileX, tileY));
 		}
 
 		/// <summary>
-		/// Determines if a tile is valid
+		/// Determines if a tile is valid.
 		/// </summary>
 		/// <param name="tileX">Location X</param>
 		/// <param name="tileY">Location Y</param>
 		/// <returns>If the tile is valid</returns>
-		public bool TileValid(int tileX, int tileY)
+		public bool TilePlacementValid(int tileX, int tileY)
 		{
 			return tileX >= 0 && tileX < Main.maxTilesX && tileY >= 0 && tileY < Main.maxTilesY;
 		}
 
 		/// <summary>
-		/// Checks to see if the tile is clear.
+		/// Checks if the tile is solid.
 		/// </summary>
 		/// <param name="tileX">Location X</param>
 		/// <param name="tileY">Location Y</param>
-		/// <returns>The state of the tile</returns>
-		private bool TileClear(int tileX, int tileY)
+		/// <returns>The tile's solidity.</returns>
+		public bool TileSolid(int tileX, int tileY)
 		{
-			return !Main.tile[tileX, tileY].active;
+			return TilePlacementValid(tileX, tileY) && Main.tile[tileX, tileY] != null &&
+				Main.tile[tileX, tileY].active() && Main.tileSolid[Main.tile[tileX, tileY].type] &&
+				!Main.tile[tileX, tileY].inActive() && !Main.tile[tileX, tileY].halfBrick() && Main.tile[tileX, tileY].slope() == 0;
 		}
 
 		/// <summary>
@@ -368,7 +318,7 @@ namespace TShockAPI
 			var found = new List<Item>();
 			Item item = new Item();
 			string nameLower = name.ToLower();
-			for (int i = -24; i < Main.maxItemTypes; i++)
+			for (int i = -48; i < Main.maxItemTypes; i++)
 			{
 				item.netDefaults(i);
 				if (item.name.ToLower() == nameLower)
@@ -436,7 +386,7 @@ namespace TShockAPI
 		/// <returns>name</returns>
 		public string GetBuffName(int id)
 		{
-			return (id > 0 && id < Main.maxBuffs) ? Main.buffName[id] : "null";
+			return (id > 0 && id < Main.maxBuffTypes) ? Main.buffName[id] : "null";
 		}
 
 		/// <summary>
@@ -446,7 +396,7 @@ namespace TShockAPI
 		/// <returns>description</returns>
 		public string GetBuffDescription(int id)
 		{
-			return (id > 0 && id < Main.maxBuffs) ? Main.buffTip[id] : "null";
+			return (id > 0 && id < Main.maxBuffTypes) ? Main.buffTip[id] : "null";
 		}
 
 		/// <summary>
@@ -457,13 +407,13 @@ namespace TShockAPI
 		public List<int> GetBuffByName(string name)
 		{
 			string nameLower = name.ToLower();
-			for (int i = 1; i < Main.maxBuffs; i++)
+			for (int i = 1; i < Main.maxBuffTypes; i++)
 			{
 				if (Main.buffName[i].ToLower() == nameLower)
 					return new List<int> {i};
 			}
 			var found = new List<int>();
-			for (int i = 1; i < Main.maxBuffs; i++)
+			for (int i = 1; i < Main.maxBuffTypes; i++)
 			{
 				if (Main.buffName[i].ToLower().StartsWith(nameLower))
 					found.Add(i);
@@ -478,11 +428,7 @@ namespace TShockAPI
 		/// <returns>Prefix name</returns>
 		public string GetPrefixById(int id)
 		{
-			var item = new Item();
-			item.SetDefaults(0);
-			item.prefix = (byte) id;
-			item.AffixName();
-			return item.name.Trim();
+			return id < FirstItemPrefix || id > LastItemPrefix ? "" : Lang.prefix[id] ?? "";
 		}
 
 		/// <summary>
@@ -507,8 +453,8 @@ namespace TShockAPI
 			}
 			return found;
 		}
-        
-        /// <summary>
+				
+				/// <summary>
 		/// Gets a prefix by ID or name
 		/// </summary>
 		/// <param name="idOrName">ID or name</param>
@@ -560,13 +506,37 @@ namespace TShockAPI
 			Netplay.disconnect = true;
 		}
 
-#if COMPAT_SIGS
-		[Obsolete("This method is for signature compatibility for external code only")]
-		public void ForceKick(TSPlayer player, string reason)
+		/// <summary>
+		/// Stops the server after kicking all players with a reason message, and optionally saving the world then attempts to 
+		/// restart it.
+		/// </summary>
+		/// <param name="save">bool perform a world save before stop (default: true)</param>
+		/// <param name="reason">string reason (default: "Server shutting down!")</param>
+		public void RestartServer(bool save = true, string reason = "Server shutting down!")
 		{
-			Kick(player, reason, true, false, string.Empty);
+			if (Main.ServerSideCharacter)
+				foreach (TSPlayer player in TShock.Players)
+					if (player != null && player.IsLoggedIn && !player.IgnoreActionsForClearingTrashCan)
+						TShock.CharacterDB.InsertPlayerData(player);
+
+			StopServer(true, reason);
+			System.Diagnostics.Process.Start(System.Reflection.Assembly.GetExecutingAssembly().GetName().CodeBase);
+			Environment.Exit(0);
 		}
-#endif
+
+		/// <summary>
+		/// Reloads all configuration settings, groups, regions and raises the reload event.
+		/// </summary>
+		public void Reload(TSPlayer player)
+		{
+			FileTools.SetupConfig();
+			TShock.HandleCommandLinePostConfigLoad(Environment.GetCommandLineArgs());
+			TShock.Groups.LoadPermisions();
+			TShock.Regions.Reload();
+			TShock.Itembans.UpdateItemBans();
+			Hooks.GeneralHooks.OnReloadEvent(player);
+		}
+
 		/// <summary>
 		/// Kicks a player from the server without checking for immunetokick permission.
 		/// </summary>
@@ -578,13 +548,6 @@ namespace TShockAPI
 			Kick(player, reason, true, silent, null, saveSSI);
 		}
 
-#if COMPAT_SIGS
-		[Obsolete("This method is for signature compatibility for external code only")]
-		public bool Kick(TSPlayer player, string reason, string adminUserName)
-		{
-			return Kick(player, reason, false, false, adminUserName);
-		}
-#endif
 		/// <summary>
 		/// Kicks a player from the server..
 		/// </summary>
@@ -602,30 +565,23 @@ namespace TShockAPI
 			{
 				string playerName = player.Name;
 				player.SilentKickInProgress = silent;
-                if (player.IsLoggedIn && saveSSI)
-                    player.SaveServerInventory();
+								if (player.IsLoggedIn && saveSSI)
+										player.SaveServerCharacter();
 				player.Disconnect(string.Format("Kicked: {0}", reason));
-				Log.ConsoleInfo(string.Format("Kicked {0} for : {1}", playerName, reason));
+				TShock.Log.ConsoleInfo(string.Format("Kicked {0} for : '{1}'", playerName, reason));
 				string verb = force ? "force " : "";
-                if (!silent)
-                {
-                    if (string.IsNullOrWhiteSpace(adminUserName))
-                        Broadcast(string.Format("{0} was {1}kicked for {2}", playerName, verb, reason.ToLower()), Color.Green);
-                    else
-						Broadcast(string.Format("{0} {1}kicked {2} for {3}", adminUserName, verb, playerName, reason.ToLower()), Color.Green);
-                }
+								if (!silent)
+								{
+										if (string.IsNullOrWhiteSpace(adminUserName))
+												Broadcast(string.Format("{0} was {1}kicked for '{2}'", playerName, verb, reason.ToLower()), Color.Green);
+										else
+						Broadcast(string.Format("{0} {1}kicked {2} for '{3}'", adminUserName, verb, playerName, reason.ToLower()), Color.Green);
+								}
 				return true;
 			}
 			return false;
 		}
 
-#if COMPAT_SIGS
-		[Obsolete("This method is for signature compatibility for external code only")]
-		public bool Ban(TSPlayer player, string reason, string adminUserName)
-		{
-			return Ban(player, reason, false, adminUserName);
-		}
-#endif
 		/// <summary>
 		/// Bans and kicks a player from the server.
 		/// </summary>
@@ -640,24 +596,47 @@ namespace TShockAPI
 			if (force || !player.Group.HasPermission(Permissions.immunetoban))
 			{
 				string ip = player.IP;
+				string uuid = player.UUID;
 				string playerName = player.Name;
-				TShock.Bans.AddBan(ip, playerName, reason);
+				TShock.Bans.AddBan(ip, playerName, uuid, reason, false, adminUserName);
 				player.Disconnect(string.Format("Banned: {0}", reason));
-				Log.ConsoleInfo(string.Format("Banned {0} for : {1}", playerName, reason));
 				string verb = force ? "force " : "";
 				if (string.IsNullOrWhiteSpace(adminUserName))
-					Broadcast(string.Format("{0} was {1}banned for {2}", playerName, verb, reason.ToLower()));
+					TSPlayer.All.SendInfoMessage("{0} was {1}banned for '{2}'.", playerName, verb, reason);
 				else
-					Broadcast(string.Format("{0} {1}banned {2} for {3}", adminUserName, verb, playerName, reason.ToLower()));
+					TSPlayer.All.SendInfoMessage("{0} {1}banned {2} for '{3}'.", adminUserName, verb, playerName, reason);
 				return true;
 			}
 			return false;
 		}
 
+		public bool HasBanExpired(Ban ban, bool byName = false)
+		{
+					DateTime exp;
+					bool expirationExists = DateTime.TryParse(ban.Expiration, out exp);
+
+					if (!string.IsNullOrWhiteSpace(ban.Expiration) && (expirationExists) &&
+							(DateTime.UtcNow >= exp))
+					{
+							if (byName)
+							{
+									TShock.Bans.RemoveBan(ban.Name, true, true, false);
+							}
+							else
+							{
+									TShock.Bans.RemoveBan(ban.IP, false, false, false);
+							}
+							
+							return true;
+					}
+
+				return false;
+		}
+
 		/// <summary>
 		/// Shows a file to the user.
 		/// </summary>
-		/// <param name="ply">int player</param>
+		/// <param name="ply">TSPlayer player</param>
 		/// <param name="file">string filename reletave to savedir</param>
 		public void ShowFileToUser(TSPlayer player, string file)
 		{
@@ -666,31 +645,28 @@ namespace TShockAPI
 			{
 				while ((foo = tr.ReadLine()) != null)
 				{
-					foo = foo.Replace("%map%", Main.worldName);
-					foo = foo.Replace("%players%", GetPlayers());
-					//foo = SanitizeString(foo);
-					if (foo.Substring(0, 1) == "%" && foo.Substring(12, 1) == "%") //Look for a beginning color code.
+					if (string.IsNullOrWhiteSpace(foo))
 					{
-						string possibleColor = foo.Substring(0, 13);
-						foo = foo.Remove(0, 13);
-						float[] pC = {0, 0, 0};
-						possibleColor = possibleColor.Replace("%", "");
-						string[] pCc = possibleColor.Split(',');
-						if (pCc.Length == 3)
-						{
-							try
-							{
-								player.SendMessage(foo, (byte) Convert.ToInt32(pCc[0]), (byte) Convert.ToInt32(pCc[1]),
-								                   (byte) Convert.ToInt32(pCc[2]));
-								continue;
-							}
-							catch (Exception e)
-							{
-								Log.Error(e.ToString());
-							}
-						}
+						continue;
 					}
-					player.SendMessage(foo);
+
+					foo = foo.Replace("%map%", (TShock.Config.UseServerName ? TShock.Config.ServerName : Main.worldName));
+					foo = foo.Replace("%players%", String.Join(",", GetPlayers(false)));
+					Regex reg = new Regex("%\\s*(?<r>\\d{1,3})\\s*,\\s*(?<g>\\d{1,3})\\s*,\\s*(?<b>\\d{1,3})\\s*%");
+					var matches = reg.Matches(foo);
+					Color c = Color.White;
+					foreach (Match match in matches)
+					{
+						byte r, g, b;
+						if (byte.TryParse(match.Groups["r"].Value, out r) &&
+							byte.TryParse(match.Groups["g"].Value, out g) &&
+							byte.TryParse(match.Groups["b"].Value, out b))
+						{
+							c = new Color(r, g, b);
+						}
+						foo = foo.Remove(match.Index, match.Length);
+					}
+					player.SendMessage(foo, c);
 				}
 			}
 		}
@@ -709,7 +685,7 @@ namespace TShockAPI
 					return TShock.Groups.groups[i];
 				}
 			}
-			return new Group(TShock.Config.DefaultGuestGroupName);
+				return Group.DefaultGroup;
 		}
 
 		/// <summary>
@@ -731,23 +707,35 @@ namespace TShockAPI
 			return "";
 		}
 
-        /// <summary>
-        /// Default hashing algorithm.
-        /// </summary>
-        public string HashAlgo = "sha512";
+		/// <summary>
+		/// Sends the player an error message stating that more than one match was found
+		/// appending a csv list of the matches.
+		/// </summary>
+		/// <param name="ply">Player to send the message to</param>
+		/// <param name="matches">An enumerable list with the matches</param>
+		public void SendMultipleMatchError(TSPlayer ply, IEnumerable<object> matches)
+		{
+			ply.SendErrorMessage("More than one match found: {0}", string.Join(",", matches));
+			ply.SendErrorMessage("Use \"my query\" for items with spaces");
+		}
 
-        /// <summary>
-        /// A dictionary of hashing algortihms and an implementation object.
-        /// </summary>
+				/// <summary>
+				/// Default hashing algorithm.
+				/// </summary>
+				public string HashAlgo = "sha512";
+
+				/// <summary>
+				/// A dictionary of hashing algortihms and an implementation object.
+				/// </summary>
 		public readonly Dictionary<string, Func<HashAlgorithm>> HashTypes = new Dictionary<string, Func<HashAlgorithm>>
-		                                                                    	{
-		                                                                    		{"sha512", () => new SHA512Managed()},
-		                                                                    		{"sha256", () => new SHA256Managed()},
-		                                                                    		{"md5", () => new MD5Cng()},
-		                                                                    		{"sha512-xp", () => SHA512.Create()},
-		                                                                    		{"sha256-xp", () => SHA256.Create()},
-		                                                                    		{"md5-xp", () => MD5.Create()},
-		                                                                    	};
+																																					{
+																																						{"sha512", () => new SHA512Managed()},
+																																						{"sha256", () => new SHA256Managed()},
+																																						{"md5", () => new MD5Cng()},
+																																						{"sha512-xp", () => SHA512.Create()},
+																																						{"sha256-xp", () => SHA256.Create()},
+																																						{"md5-xp", () => MD5.Create()},
+																																					};
 
 		/// <summary>
 		/// Returns a Sha256 string for a given string
@@ -811,6 +799,52 @@ namespace TShockAPI
 		}
 
 		/// <summary>
+		/// Attempts to parse a string as a timespan (_d_m_h_s).
+		/// </summary>
+		/// <param name="time">The time string.</param>
+		/// <param name="seconds">The seconds.</param>
+		/// <returns>Whether the string was parsed successfully.</returns>
+		public bool TryParseTime(string str, out int seconds)
+		{
+			seconds = 0;
+
+			var sb = new StringBuilder(3);
+			for (int i = 0; i < str.Length; i++)
+			{
+				if (Char.IsDigit(str[i]) || (str[i] == '-' || str[i] == '+'))
+					sb.Append(str[i]);
+				else
+				{
+					int num;
+					if (!int.TryParse(sb.ToString(), out num))
+						return false;
+					
+					sb.Clear();
+					switch (str[i])
+					{
+						case 's':
+							seconds += num;
+							break;
+						case 'm':
+							seconds += num * 60;
+							break;
+						case 'h':
+							seconds += num * 60 * 60;
+							break;
+						case 'd':
+							seconds += num * 60 * 60 * 24;
+							break;
+						default:
+							return false;
+					}
+				}
+			}
+			if (sb.Length != 0)
+				return false;
+			return true;
+		}
+
+		/// <summary>
 		/// Searches for a projectile by identity and owner
 		/// </summary>
 		/// <param name="identity">identity</param>
@@ -840,6 +874,83 @@ namespace TShockAPI
 					returnstr[i] = ' ';
 			}
 			return new string(returnstr);
+		}
+
+		/// <summary>
+		/// Enumerates boundary points of the given region's rectangle.
+		/// </summary>
+		/// <param name="regionArea">The region's area to enumerate through.</param>
+		/// <returns>The enumerated boundary points.</returns>
+		public IEnumerable<Point> EnumerateRegionBoundaries(Rectangle regionArea)
+		{
+			for (int x = 0; x < regionArea.Width + 1; x++)
+			{
+				yield return new Point(regionArea.Left + x, regionArea.Top);
+				yield return new Point(regionArea.Left + x, regionArea.Bottom);
+			}
+
+			for (int y = 1; y < regionArea.Height; y++)
+			{
+				yield return new Point(regionArea.Left, regionArea.Top + y);
+				yield return new Point(regionArea.Right, regionArea.Top + y);
+			}
+		}
+
+		public int? EncodeColor(Color? color)
+		{
+			if (color == null)
+				return null;
+
+			return BitConverter.ToInt32(new[] { color.Value.R, color.Value.G, color.Value.B, color.Value.A }, 0);
+		}
+
+		public Color? DecodeColor(int? encodedColor)
+		{
+			if (encodedColor == null)
+				return null;
+
+			byte[] data = BitConverter.GetBytes(encodedColor.Value);
+			return new Color(data[0], data[1], data[2], data[3]);
+		}
+
+		public byte? EncodeBitsByte(BitsByte? bitsByte)
+		{
+			if (bitsByte == null)
+				return null;
+
+			byte result = 0;
+			for (int i = 0; i < 8; i++)
+				if (bitsByte.Value[i])
+					result |= (byte)(1 << i);
+
+			return result;
+		}
+
+		public BitsByte? DecodeBitsByte(int? encodedBitsByte)
+		{
+			if (encodedBitsByte == null)
+				return null;
+
+			BitsByte result = new BitsByte();
+			for (int i = 0; i < 8; i++)
+				result[i] = (encodedBitsByte & 1 << i) != 0;
+
+			return result;
+		}
+
+		public HttpWebResponse GetResponseNoException(HttpWebRequest req)
+		{
+			try
+			{
+				return (HttpWebResponse)req.GetResponse();
+			}
+			catch (WebException we)
+			{
+				var resp = we.Response as HttpWebResponse;
+				if (resp == null)
+					throw;
+				return resp;
+			}
 		}
 	}
 }

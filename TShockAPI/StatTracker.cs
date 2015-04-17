@@ -1,99 +1,87 @@
-﻿/*
-TShock, a server mod for Terraria
-Copyright (C) 2011-2012 The TShock Team
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
-using System;
-using System.IO;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 using System.Net;
 using System.Threading;
-using Terraria;
+using System.IO;
+using System.Web;
+using TerrariaApi.Server;
 
 namespace TShockAPI
 {
 	public class StatTracker
 	{
-		private Utils Utils = TShock.Utils;
-		public DateTime lastcheck = DateTime.MinValue;
-		private readonly int checkinFrequency = 5;
-
-		public void CheckIn()
+		private bool failed;
+		private bool initialized;
+		public StatTracker()
 		{
-			if ((DateTime.Now - lastcheck).TotalMinutes >= checkinFrequency)
+			
+		}
+
+		public void Initialize()
+		{
+			if (!initialized)
 			{
-				ThreadPool.QueueUserWorkItem(CallHome);
-				lastcheck = DateTime.Now;
+				initialized = true;
+				ThreadPool.QueueUserWorkItem(SendUpdate);
 			}
 		}
 
-		private void CallHome(object state)
+		private void SendUpdate(object info)
 		{
-			string fp;
-			string lolpath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) + "/.tshock/";
-			if (!Directory.Exists(lolpath))
+			Thread.Sleep(1000*60*15);
+			var data = new JsonData
 			{
-				Directory.CreateDirectory(lolpath);
-			}
-			if (!File.Exists(Path.Combine(lolpath, Netplay.serverPort + ".fingerprint")))
-			{
-				fp = "";
-				int random = Utils.Random.Next(500000, 1000000);
-				fp += random;
+				port = Terraria.Netplay.serverPort,
+				currentPlayers = TShock.Utils.ActivePlayers(),
+				maxPlayers = TShock.Config.MaxSlots,
+				systemRam = 0,
+				systemCPUClock = 0,
+				version = TShock.VersionNum.ToString(),
+				terrariaVersion = Terraria.Main.versionNumber2,
+				mono = ServerApi.RunningMono
+			};
 
-				fp = Utils.HashPassword(Netplay.serverIP + fp + Netplay.serverPort + Netplay.serverListenIP);
-				TextWriter tw = new StreamWriter(Path.Combine(lolpath, Netplay.serverPort + ".fingerprint"));
-				tw.Write(fp);
-				tw.Close();
-			}
-			else
+			var serialized = Newtonsoft.Json.JsonConvert.SerializeObject(data);
+			var encoded = HttpUtility.UrlEncode(serialized);
+			var uri = String.Format("http://stats.tshock.co/publish/{0}", encoded);
+			var client = (HttpWebRequest)WebRequest.Create(uri);
+			client.Timeout = 5000;
+			try
 			{
-				fp = "";
-				TextReader tr = new StreamReader(Path.Combine(lolpath, Netplay.serverPort + ".fingerprint"));
-				fp = tr.ReadToEnd();
-				tr.Close();
-			}
+				using (var resp = TShock.Utils.GetResponseNoException(client))
+				{
+					if (resp.StatusCode != HttpStatusCode.OK)
+					{
+						throw new IOException("Server did not respond with an OK.");
+					}
 
-			using (var client = new WebClient())
-			{
-				client.Headers.Add("user-agent",
-				                   "TShock (" + TShock.VersionNum + ")");
-				try
-				{
-					string response;
-					if (TShock.Config.DisablePlayerCountReporting)
-					{
-						response =
-							client.DownloadString("http://tshock.co/tickto.php?do=log&fp=" + fp + "&ver=" + TShock.VersionNum + "&os=" +
-							                      Environment.OSVersion + "&mono=" + Main.runningMono + "&port=" + Netplay.serverPort +
-							                      "&plcount=0");
-					}
-					else
-					{
-						response =
-							client.DownloadString("http://tshock.co/tickto.php?do=log&fp=" + fp + "&ver=" + TShock.VersionNum + "&os=" +
-							                      Environment.OSVersion + "&mono=" + Main.runningMono + "&port=" + Netplay.serverPort +
-							                      "&plcount=" + TShock.Utils.ActivePlayers());
-					}
-                    if (!TShock.Config.HideStatTrackerDebugMessages)
-					    Log.ConsoleInfo("Stat Tracker: " + response);
-				}
-				catch (Exception e)
-				{
-					Log.Error(e.ToString());
+					failed = false;
 				}
 			}
+			catch (Exception e)
+			{
+				if (!failed)
+				{
+					TShock.Log.ConsoleError("StatTracker Exception: {0}", e);
+					failed = true;
+				}
+			}
+
+			ThreadPool.QueueUserWorkItem(SendUpdate);
 		}
+	}
+
+	public struct JsonData
+	{
+		public int port;
+		public int currentPlayers;
+		public int maxPlayers;
+		public int systemRam;
+		public int systemCPUClock;
+		public string version;
+		public string terrariaVersion;
+		public bool mono;
 	}
 }

@@ -1,6 +1,6 @@
 ﻿/*
 TShock, a server mod for Terraria
-Copyright (C) 2011-2012 The TShock Team
+Copyright (C) 2011-2015 Nyx Studios (fka. The TShock Team)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -15,10 +15,12 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using MySql.Data.MySqlClient;
 using Terraria;
 
@@ -27,161 +29,214 @@ namespace TShockAPI.DB
 	public class WarpManager
 	{
 		private IDbConnection database;
+		/// <summary>
+		/// The list of warps.
+		/// </summary>
+		public List<Warp> Warps = new List<Warp>();
 
 		[SuppressMessage("Microsoft.Reliability", "CA2000:Dispose objects before losing scope")]
-		public WarpManager(IDbConnection db)
+		internal WarpManager(IDbConnection db)
 		{
 			database = db;
 
 			var table = new SqlTable("Warps",
-			                         new SqlColumn("WarpName", MySqlDbType.VarChar, 50) {Primary = true},
+			                         new SqlColumn("Id", MySqlDbType.Int32){Primary = true, AutoIncrement = true},
+									 new SqlColumn("WarpName", MySqlDbType.VarChar, 50) {Unique = true},
 			                         new SqlColumn("X", MySqlDbType.Int32),
 			                         new SqlColumn("Y", MySqlDbType.Int32),
-			                         new SqlColumn("WorldID", MySqlDbType.Text),
+									 new SqlColumn("WorldID", MySqlDbType.VarChar, 50) { Unique = true },
 			                         new SqlColumn("Private", MySqlDbType.Text)
 				);
 			var creator = new SqlTableCreator(db,
 			                                  db.GetSqlType() == SqlType.Sqlite
 			                                  	? (IQueryBuilder) new SqliteQueryCreator()
 			                                  	: new MysqlQueryCreator());
-			creator.EnsureExists(table);
+			creator.EnsureTableStructure(table);
 		}
 
-		public bool AddWarp(int x, int y, string name, string worldid)
+		/// <summary>
+		/// Adds a warp.
+		/// </summary>
+		/// <param name="x">The X position.</param>
+		/// <param name="y">The Y position.</param>
+		/// <param name="name">The name.</param>
+		/// <returns>Whether the opration succeeded.</returns>
+		public bool Add(int x, int y, string name)
 		{
 			try
 			{
-				database.Query("INSERT INTO Warps (X, Y, WarpName, WorldID) VALUES (@0, @1, @2, @3);", x, y, name, worldid);
-				return true;
-			}
-			catch (Exception ex)
-			{
-				Log.Error(ex.ToString());
-			}
-			return false;
-		}
-
-		public bool RemoveWarp(string name)
-		{
-			try
-			{
-				database.Query("DELETE FROM Warps WHERE WarpName=@0 AND WorldID=@1", name, Main.worldID.ToString());
-				return true;
-			}
-			catch (Exception ex)
-			{
-				Log.Error(ex.ToString());
-			}
-			return false;
-		}
-
-		public Warp FindWarp(string name)
-		{
-			try
-			{
-				using (
-					var reader = database.QueryReader("SELECT * FROM Warps WHERE WarpName=@0 AND WorldID=@1", name,
-					                                  Main.worldID.ToString()))
+				if (database.Query("INSERT INTO Warps (X, Y, WarpName, WorldID) VALUES (@0, @1, @2, @3);",
+					x, y, name, Main.worldID.ToString()) > 0)
 				{
-					if (reader.Read())
-					{
-						try
-						{
-							return new Warp(new Vector2(reader.Get<int>("X"), reader.Get<int>("Y")), reader.Get<string>("WarpName"),
-							                reader.Get<string>("WorldID"), reader.Get<string>("Private"));
-						}
-						catch
-						{
-							return new Warp(new Vector2(reader.Get<int>("X"), reader.Get<int>("Y")), reader.Get<string>("WarpName"),
-							                reader.Get<string>("WorldID"), "0");
-						}
-					}
+					Warps.Add(new Warp(new Point(x, y), name));
+					return true;
 				}
 			}
 			catch (Exception ex)
 			{
-				Log.Error(ex.ToString());
+				TShock.Log.Error(ex.ToString());
 			}
-			return new Warp();
+			return false;
 		}
 
 		/// <summary>
-		/// Gets all the warps names from world
+		/// Reloads all warps.
 		/// </summary>
-		/// <param name="worldid">World name to get warps from</param>
-		/// <returns>List of warps with only their names</returns>
-		public List<Warp> ListAllPublicWarps(string worldid)
+		public void ReloadWarps()
 		{
-			var warps = new List<Warp>();
+			Warps.Clear();
+
+			using (var reader = database.QueryReader("SELECT * FROM Warps WHERE WorldID = @0",
+				Main.worldID.ToString()))
+			{
+				while (reader.Read())
+				{
+					Warps.Add(new Warp(
+						new Point(reader.Get<int>("X"), reader.Get<int>("Y")),
+						reader.Get<string>("WarpName"),
+						(reader.Get<string>("Private") ?? "0") != "0"));
+				}
+			}
+		}
+
+		/// <summary>
+		/// Removes a warp.
+		/// </summary>
+		/// <param name="warpName">The warp name.</param>
+		/// <returns>Whether the operation succeeded.</returns>
+		public bool Remove(string warpName)
+		{
 			try
 			{
-				using (var reader = database.QueryReader("SELECT * FROM Warps WHERE WorldID=@0", worldid))
+				if (database.Query("DELETE FROM Warps WHERE WarpName = @0 AND WorldID = @1",
+					warpName, Main.worldID.ToString()) > 0)
 				{
-					while (reader.Read())
-					{
-						try
-						{
-							if (reader.Get<String>("Private") == "0" || reader.Get<String>("Private") == null)
-								warps.Add(new Warp {WarpName = reader.Get<string>("WarpName")});
-						}
-						catch
-						{
-							warps.Add(new Warp {WarpName = reader.Get<string>("WarpName")});
-						}
-					}
+					Warps.RemoveAll(w => String.Equals(w.Name, warpName, StringComparison.OrdinalIgnoreCase));
+					return true;
 				}
 			}
 			catch (Exception ex)
 			{
-				Log.Error(ex.ToString());
+				TShock.Log.Error(ex.ToString());
 			}
-			return warps;
+			return false;
 		}
 
 		/// <summary>
-		/// Gets all the warps names from world
+		/// Finds the warp with the given name.
 		/// </summary>
-		/// <param name="worldid">World name to get warps from</param>
-		/// <returns>List of warps with only their names</returns>
-		public bool HideWarp(string warp, bool state)
+		/// <param name="warpName">The name.</param>
+		/// <returns>The warp, if it exists, or else null.</returns>
+		public Warp Find(string warpName)
+		{
+			return Warps.FirstOrDefault(w => String.Equals(w.Name, warpName, StringComparison.OrdinalIgnoreCase));
+		}
+		/// <summary>
+		/// Finds the warp with the given name.
+		/// </summary>
+		/// <param name="warpName">The name.</param>
+		/// <returns>The warp, if it exists, or else null.</returns>
+		[Obsolete]
+		public Warp FindWarp(string warpName)
+		{
+			return Warps.FirstOrDefault(w => String.Equals(w.Name, warpName, StringComparison.OrdinalIgnoreCase));
+		}
+
+		/// <summary>
+		/// Sets the position of a warp.
+		/// </summary>
+		/// <param name="warpName">The warp name.</param>
+		/// <param name="x">The X position.</param>
+		/// <param name="y">The Y position.</param>
+		/// <returns>Whether the operation suceeded.</returns>
+		public bool Position(string warpName, int x, int y)
 		{
 			try
 			{
-				string query = "UPDATE Warps SET Private=@0 WHERE WarpName=@1 AND WorldID=@2";
-
-				database.Query(query, state ? "1" : "0", warp, Main.worldID.ToString());
-
-				return true;
+				if (database.Query("UPDATE Warps SET X = @0, Y = @1 WHERE WarpName = @2 AND WorldID = @3",
+					x, y, warpName, Main.worldID.ToString()) > 0)
+				{
+					Warps.Find(w => String.Equals(w.Name, warpName, StringComparison.OrdinalIgnoreCase)).Position = new Point(x, y);
+					return true;
+				}
 			}
 			catch (Exception ex)
 			{
-				Log.Error(ex.ToString());
-				return false;
+				TShock.Log.Error(ex.ToString());
 			}
+			return false;
+		}
+
+		/// <summary>
+		/// Sets the hidden state of a warp.
+		/// </summary>
+		/// <param name="warpName">The warp name.</param>
+		/// <param name="state">The state.</param>
+		/// <returns>Whether the operation suceeded.</returns>
+		public bool Hide(string warpName, bool state)
+		{
+			try
+			{
+				if (database.Query("UPDATE Warps SET Private = @0 WHERE WarpName = @1 AND WorldID = @2",
+					state ? "1" : "0", warpName, Main.worldID.ToString()) > 0)
+				{
+					Warps.Find(w => String.Equals(w.Name, warpName, StringComparison.OrdinalIgnoreCase)).IsPrivate = state;
+					return true;
+				}
+			}
+			catch (Exception ex)
+			{
+				TShock.Log.Error(ex.ToString());
+			}
+			return false;
 		}
 	}
 
+	/// <summary>
+	/// Represents a warp.
+	/// </summary>
 	public class Warp
 	{
-		public Vector2 WarpPos { get; set; }
-		public string WarpName { get; set; }
-		public string WorldWarpID { get; set; }
-		public string Private { get; set; }
-
-		public Warp(Vector2 warppos, string name, string worldid, string hidden)
+		/// <summary>
+		/// Gets or sets the name.
+		/// </summary>
+		public string Name { get; set; }
+		/// <summary>
+		/// Gets or sets the warp's privacy state.
+		/// </summary>
+		public bool IsPrivate { get; set; }
+		/// <summary>
+		/// Gets or sets the position.
+		/// </summary>
+		public Point Position { get; set; }
+		/// <summary>
+		/// Gets or sets the position.
+		/// </summary>
+		[Obsolete]
+		public Vector2 WarpPos
 		{
-			WarpPos = warppos;
-			WarpName = name;
-			WorldWarpID = worldid;
-			Private = hidden;
+			get { return new Vector2(Position.X, Position.Y); }
+			set { Position = new Point((int)value.X, (int)value.Y); }
 		}
 
+		public Warp(Point position, string name, bool isPrivate = false)
+		{
+			Name = name;
+			Position = position;
+			IsPrivate = isPrivate;
+		}
+		[Obsolete]
+		public Warp(Vector2 position, string name, bool isPrivate = false)
+		{
+			Name = name;
+			WarpPos = position;
+			IsPrivate = isPrivate;
+		}
 		public Warp()
 		{
-			WarpPos = Vector2.Zero;
-			WarpName = null;
-			WorldWarpID = string.Empty;
-			Private = "0";
+			Position = Point.Zero;
+			Name = "";
+			IsPrivate = false;
 		}
 	}
 }

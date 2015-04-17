@@ -1,6 +1,6 @@
 ﻿/*
 TShock, a server mod for Terraria
-Copyright (C) 2011-2012 The TShock Team
+Copyright (C) 2011-2015 Nyx Studios (fka. The TShock Team)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -25,9 +26,9 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyTitle("TShock for Terraria")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("Nyx Team")]
+[assembly: AssemblyCompany("Nyx Studios & TShock Contributors")]
 [assembly: AssemblyProduct("TShockAPI")]
-[assembly: AssemblyCopyright("Copyright © Nyx Team 2012")]
+[assembly: AssemblyCopyright("Copyright © Nyx Studios 2011-2015")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -46,7 +47,11 @@ using System.Runtime.InteropServices;
 //      Major Version
 //      Minor Version 
 //      Build Number
-//      MMdd of the build
+//      Starting in version 4.2.5, we are no longer including the fourth decimal
+//      location, which previously held the date and time.
 
-[assembly: AssemblyVersion("4.0.0.0923")]
-[assembly: AssemblyFileVersion("4.0.0.0923")]
+// Also, be sure to release on github with the exact assembly version tag as below
+// so that the update manager works correctly (via the Github releases api and mimic)
+
+[assembly: AssemblyVersion("4.2.10")]
+[assembly: AssemblyFileVersion("4.2.10")]

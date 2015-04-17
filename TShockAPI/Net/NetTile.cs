@@ -1,6 +1,6 @@
 ﻿/*
 TShock, a server mod for Terraria
-Copyright (C) 2011-2012 The TShock Team
+Copyright (C) 2011-2015 Nyx Studios (fka. The TShock Team)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 using System;
 using System.IO;
 using System.IO.Streams;
@@ -25,13 +26,36 @@ namespace TShockAPI.Net
 	public class NetTile : IPackable
 	{
 		public bool Active { get; set; }
-		public byte Type { get; set; }
+		public ushort Type { get; set; }
 		public short FrameX { get; set; }
 		public short FrameY { get; set; }
+		public bool Lighted { get; set; }
 		public byte Wall { get; set; }
 		public byte Liquid { get; set; }
-		public bool Lava { get; set; }
+		public byte LiquidType { get; set; }
 		public bool Wire { get; set; }
+		public bool Wire2 { get; set; }
+		public bool Wire3 { get; set; }
+		public byte HalfBrick { get; set; }
+		public byte Actuator { get; set; }
+		public bool Inactive { get; set; }
+		public bool IsHalf { get; set; }
+		public bool IsActuator { get; set; }
+		public byte TileColor { get; set; }
+		public byte WallColor { get; set; }
+		public bool Slope { get; set; }
+		public bool Slope2 { get; set; }
+		public bool Slope3 { get; set; }
+
+	public bool HasColor
+		{
+			get { return TileColor > 0; }
+		}
+
+		public bool HasWallColor
+		{
+			get { return WallColor > 0; }
+		}
 
 		public bool HasWall
 		{
@@ -56,8 +80,17 @@ namespace TShockAPI.Net
 			FrameY = -1;
 			Wall = 0;
 			Liquid = 0;
-			Lava = false;
 			Wire = false;
+			Wire2 = false;
+			Wire3 = false;
+			HalfBrick = 0;
+			Actuator = 0;
+			Inactive = false;
+			TileColor = 0;
+			WallColor = 0;
+			Lighted = false;
+			Slope = false;
+			Slope2 = false;
 		}
 
 		public NetTile(Stream stream)
@@ -68,25 +101,72 @@ namespace TShockAPI.Net
 
 		public void Pack(Stream stream)
 		{
-			var flags = TileFlags.None;
+			var bits = new BitsByte();
 
-			if (Active)
-				flags |= TileFlags.Active;
+			if ((Active) && (!Inactive))
+				bits[0] = true;
 
 			if (HasWall)
-				flags |= TileFlags.Wall;
+				bits[2] = true;
 
 			if (HasLiquid)
-				flags |= TileFlags.Liquid;
+				bits[3] = true;
 
 			if (Wire)
-				flags |= TileFlags.Wire;
+				bits[4] = true;
+			
+			if (IsHalf)
+				bits[5] = true;
 
-			stream.WriteInt8((byte) flags);
+			if (IsActuator)
+				bits[6] = true;
+
+			if (Inactive)
+			{
+				bits[7] = true;
+			}
+
+			stream.WriteInt8((byte) bits);
+
+			bits = new BitsByte();
+
+			if ((Wire2))
+				bits[0] = true;
+
+			if (Wire3)
+				bits[1] = true;
+
+			if (HasColor)
+				bits[2] = true;
+
+			if (HasWallColor)
+				bits[3] = true;
+
+			if (Slope)
+				bits[4] = true;
+
+			if (Slope2)
+				bits[5] = true;
+
+			if (Slope3)
+				bits[6] = true;
+
+
+			stream.WriteInt8((byte)bits);
+
+			if (HasColor)
+			{
+				stream.WriteByte(TileColor);
+			}
+
+			if (HasWallColor)
+			{
+				stream.WriteByte(WallColor);
+			}
 
 			if (Active)
 			{
-				stream.WriteInt8(Type);
+				stream.WriteInt16((short)Type);
 				if (FrameImportant)
 				{
 					stream.WriteInt16(FrameX);
@@ -100,18 +180,35 @@ namespace TShockAPI.Net
 			if (HasLiquid)
 			{
 				stream.WriteInt8(Liquid);
-				stream.WriteBoolean(Lava);
+				stream.WriteInt8(LiquidType);
 			}
 		}
 
 		public void Unpack(Stream stream)
 		{
-			var flags = (TileFlags) stream.ReadInt8();
+			var flags = (BitsByte) stream.ReadInt8();
+			var flags2 = (BitsByte)stream.ReadInt8();
 
-			Active = flags.HasFlag(TileFlags.Active);
+			Wire2 = flags2[0];
+			Wire3 = flags2[1];
+			Slope = flags2[4];
+			Slope2 = flags2[5];
+			Slope3 = flags2[6];
+
+			if (flags2[2])
+			{
+				TileColor = stream.ReadInt8();
+			}
+
+			if (flags2[3])
+			{
+				WallColor = stream.ReadInt8();
+			}
+
+			Active = flags[0];
 			if (Active)
 			{
-				Type = stream.ReadInt8();
+				Type = stream.ReadUInt16();
 				if (FrameImportant)
 				{
 					FrameX = stream.ReadInt16();
@@ -119,30 +216,31 @@ namespace TShockAPI.Net
 				}
 			}
 
-			if (flags.HasFlag(TileFlags.Wall))
+			if (flags[2])
 			{
 				Wall = stream.ReadInt8();
 			}
 
-			if (flags.HasFlag(TileFlags.Liquid))
+			if (flags[3])
 			{
 				Liquid = stream.ReadInt8();
-				Lava = stream.ReadBoolean();
+				LiquidType = stream.ReadInt8();
 			}
 
-			if (flags.HasFlag(TileFlags.Wire))
+			if (flags[4])
 				Wire = true;
-		}
-	}
 
-	[Flags]
-	public enum TileFlags : byte
-	{
-		None = 0,
-		Active = 1,
-		Lighted = 2,
-		Wall = 4,
-		Liquid = 8,
-		Wire = 16
+			if (flags[5])
+				IsHalf = true;
+			
+			if (flags[6])
+				IsActuator = true;
+
+			if (flags[7])
+			{
+				Inactive = true;
+				Active = false;
+			}
+		}
 	}
 }

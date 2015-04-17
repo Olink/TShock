@@ -1,6 +1,6 @@
 ﻿/*
 TShock, a server mod for Terraria
-Copyright (C) 2011-2012 The TShock Team
+Copyright (C) 2011-2015 Nyx Studios (fka. The TShock Team)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -43,10 +44,15 @@ namespace TShockAPI.DB
 			var columns =
 				table.Columns.Select(
 					c =>
-					"'{0}' {1} {2} {3} {4} {5}".SFormat(c.Name, DbTypeToString(c.Type, c.Length), c.Primary ? "PRIMARY KEY" : "",
-					                                c.AutoIncrement ? "AUTOINCREMENT" : "", c.NotNull ? "NOT NULL" : "",
-					                                c.Unique ? "UNIQUE" : ""));
-			return "CREATE TABLE {0} ({1})".SFormat(EscapeTableName(table.Name), string.Join(", ", columns));
+					"'{0}' {1} {2} {3} {4}".SFormat(c.Name, 
+													DbTypeToString(c.Type, c.Length), 
+													c.Primary ? "PRIMARY KEY" : "",
+													c.AutoIncrement ? "AUTOINCREMENT" : "", 
+													c.NotNull ? "NOT NULL" : ""));
+			var uniques = table.Columns.Where(c => c.Unique).Select(c => c.Name);
+			return "CREATE TABLE {0} ({1} {2})".SFormat(EscapeTableName(table.Name), 
+														string.Join(", ", columns),
+														uniques.Count() > 0 ? ", UNIQUE({0})".SFormat(string.Join(", ", uniques)) : "");
 		}
 
 		public override string RenameTable(string from, string to)
@@ -56,14 +62,17 @@ namespace TShockAPI.DB
 
 		private static readonly Dictionary<MySqlDbType, string> TypesAsStrings = new Dictionary<MySqlDbType, string>
 		{
-		    {MySqlDbType.VarChar, "TEXT"},
-		    {MySqlDbType.String, "TEXT"},
-		    {MySqlDbType.Text, "TEXT"},
-		    {MySqlDbType.TinyText, "TEXT"},
-		    {MySqlDbType.MediumText, "TEXT"},
-		    {MySqlDbType.LongText, "TEXT"},
-		    {MySqlDbType.Int32, "INTEGER"},
-			{MySqlDbType.Blob, "BLOB"},
+			{ MySqlDbType.VarChar, "TEXT" },
+			{ MySqlDbType.String, "TEXT" },
+			{ MySqlDbType.Text, "TEXT" },
+			{ MySqlDbType.TinyText, "TEXT" },
+			{ MySqlDbType.MediumText, "TEXT" },
+			{ MySqlDbType.LongText, "TEXT" },
+			{ MySqlDbType.Float, "REAL" },
+			{ MySqlDbType.Double, "REAL" },
+			{ MySqlDbType.Int32, "INTEGER" },
+			{ MySqlDbType.Blob, "BLOB" },
+            { MySqlDbType.Int64, "BIGINT"},
 		};
 
 		public string DbTypeToString(MySqlDbType type, int? length)
@@ -71,7 +80,7 @@ namespace TShockAPI.DB
 			string ret;
 			if (TypesAsStrings.TryGetValue(type, out ret))
 				return ret;
-			throw new NotImplementedException(Enum.GetName(typeof (MySqlDbType), type));
+			throw new NotImplementedException(Enum.GetName(typeof(MySqlDbType), type));
 		}
 
 		protected override string EscapeTableName(string table)
@@ -88,12 +97,12 @@ namespace TShockAPI.DB
 				table.Columns.Select(
 					c =>
 					"{0} {1} {2} {3} {4}".SFormat(c.Name, DbTypeToString(c.Type, c.Length), c.Primary ? "PRIMARY KEY" : "",
-					                          c.AutoIncrement ? "AUTO_INCREMENT" : "", c.NotNull ? "NOT NULL" : ""));
+											  c.AutoIncrement ? "AUTO_INCREMENT" : "", c.NotNull ? "NOT NULL" : ""));
 			var uniques = table.Columns.Where(c => c.Unique).Select(c => c.Name);
 			return "CREATE TABLE {0} ({1} {2})".SFormat(EscapeTableName(table.Name), string.Join(", ", columns),
-			                                            uniques.Count() > 0
-			                                            	? ", UNIQUE({0})".SFormat(string.Join(", ", uniques))
-			                                            	: "");
+														uniques.Count() > 0
+															? ", UNIQUE({0})".SFormat(string.Join(", ", uniques))
+															: "");
 		}
 
 		public override string RenameTable(string from, string to)
@@ -103,21 +112,24 @@ namespace TShockAPI.DB
 
 		private static readonly Dictionary<MySqlDbType, string> TypesAsStrings = new Dictionary<MySqlDbType, string>
 		{
-		    {MySqlDbType.VarChar, "VARCHAR"},
-		    {MySqlDbType.String, "CHAR"},
-		    {MySqlDbType.Text, "TEXT"},
-		    {MySqlDbType.TinyText, "TINYTEXT"},
-		    {MySqlDbType.MediumText, "MEDIUMTEXT"},
-		    {MySqlDbType.LongText, "LONGTEXT"},
-		    {MySqlDbType.Int32, "INT"},
+			{ MySqlDbType.VarChar, "VARCHAR" },
+			{ MySqlDbType.String, "CHAR" },
+			{ MySqlDbType.Text, "TEXT" },
+			{ MySqlDbType.TinyText, "TINYTEXT" },
+			{ MySqlDbType.MediumText, "MEDIUMTEXT" },
+			{ MySqlDbType.LongText, "LONGTEXT" },
+			{ MySqlDbType.Float, "FLOAT" },
+			{ MySqlDbType.Double, "DOUBLE" },
+			{ MySqlDbType.Int32, "INT" },
+            { MySqlDbType.Int64, "BIGINT"},
 		};
 
 		public string DbTypeToString(MySqlDbType type, int? length)
 		{
 			string ret;
 			if (TypesAsStrings.TryGetValue(type, out ret))
-				return ret + (length != null ? "({0})".SFormat((int) length) : "");
-			throw new NotImplementedException(Enum.GetName(typeof (MySqlDbType), type));
+				return ret + (length != null ? "({0})".SFormat((int)length) : "");
+			throw new NotImplementedException(Enum.GetName(typeof(MySqlDbType), type));
 		}
 
 		protected override string EscapeTableName(string table)

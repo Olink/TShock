@@ -1,9 +1,26 @@
-﻿using System;
+﻿/*
+TShock, a server mod for Terraria
+Copyright (C) 2011-2015 Nyx Studios (fka. The TShock Team)
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Threading;
-using System.Diagnostics;
 using Terraria;
+using TerrariaApi.Server;
 
 namespace TShockAPI
 {
@@ -29,18 +46,21 @@ namespace TShockAPI
 		/// <summary>
 		/// SaveWorld event handler which notifies users that the server may lag
 		/// </summary>
-		public void OnSaveWorld(bool resettime = false, HandledEventArgs e = null)
+		public void OnSaveWorld(WorldSaveEventArgs args)
 		{
-			// Protect against internal errors causing save failures
-			// These can be caused by an unexpected error such as a bad or out of date plugin
-			try
+			if (TShock.Config.AnnounceSave)
 			{
-				TShock.Utils.Broadcast("Saving world. Momentary lag might result from this.", Color.Red);
-			}
-			catch (Exception ex)
-			{
-				Log.Error("World saved notification failed");
-				Log.Error(ex.ToString());
+				// Protect against internal errors causing save failures
+				// These can be caused by an unexpected error such as a bad or out of date plugin
+				try
+				{
+					TShock.Utils.Broadcast("Saving world. Momentary lag might result from this.", Color.Red);
+				}
+				catch (Exception ex)
+				{
+					TShock.Log.Error("World saved notification failed");
+					TShock.Log.Error(ex.ToString());
+				}
 			}
 		}
 
@@ -104,18 +124,18 @@ namespace TShockAPI
 							{
 								if (task.direct)
 								{
-									OnSaveWorld();
-									WorldGen.realsaveWorld(task.resetTime);
+									OnSaveWorld(new WorldSaveEventArgs());
+									WorldFile.RealSaveWorld(task.resetTime);
 								}
 								else
-									WorldGen.saveWorld(task.resetTime);
-								TShock.Utils.Broadcast("World saved.", Color.Yellow);
-								Log.Info(string.Format("World saved at ({0})", Main.worldPathName));
+									WorldFile.saveWorld(task.resetTime);
+									TShock.Utils.Broadcast("World saved.", Color.Yellow);
+									TShock.Log.Info(string.Format("World saved at ({0})", Main.worldPathName));
 							}
 							catch (Exception e)
 							{
-								Log.Error("World saved failed");
-								Log.Error(e.ToString());
+								TShock.Log.Error("World saved failed");
+								TShock.Log.Error(e.ToString());
 							}
 						}
 					}

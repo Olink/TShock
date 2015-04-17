@@ -1,6 +1,6 @@
 ﻿/*
 TShock, a server mod for Terraria
-Copyright (C) 2011-2012 The TShock Team
+Copyright (C) 2011-2015 Nyx Studios (fka. The TShock Team)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 using System;
 using System.Linq;
 using System.Collections.Generic;
@@ -28,7 +29,7 @@ namespace TShockAPI
         /// <summary>
         /// Default chat color.
         /// </summary>
-		public const string defaultChatColor = "255.255.255";
+		public const string defaultChatColor = "255,255,255";
 
         /// <summary>
         /// List of permissions available to the group.
@@ -69,11 +70,11 @@ namespace TShockAPI
 
         /// <summary>
         /// The chat color of the group.
-        /// Returns "255255255", sets "255,255,255"
+        /// Returns "255,255,255", sets "255,255,255"
         /// </summary>
 		public string ChatColor
 		{
-			get { return string.Format("{0}{1}{2}", R.ToString("X2"), G.ToString("X2"), B.ToString("X2")); }
+			get { return string.Format("{0},{1},{2}", R.ToString("D3"), G.ToString("D3"), B.ToString("D3")); }
 			set
 			{
 				if (null != value)
@@ -117,7 +118,7 @@ namespace TShockAPI
         /// <summary>
         /// The permissions of this group and all that it inherits from.
         /// </summary>
-		public List<string> TotalPermissions
+		public virtual List<string> TotalPermissions
 		{
 			get
 			{
@@ -151,13 +152,7 @@ namespace TShockAPI
 		public byte G = 255;
 		public byte B = 255;
 
-#if COMPAT_SIGS
-		[Obsolete("This constructor is for signature compatibility for external code only")]
-		public Group(string groupname, Group parentgroup, string chatcolor)
-			: this(groupname, parentgroup, chatcolor, null)
-		{
-		}
-#endif
+	    public static Group DefaultGroup = null;
 
 		public Group(string groupname, Group parentgroup = null, string chatcolor = "255,255,255", string permissions = null)
 		{
@@ -173,24 +168,30 @@ namespace TShockAPI
         /// <param name="permission">The permission to check.</param>
         /// <returns>Returns true if the user has that permission.</returns>
 		public virtual bool HasPermission(string permission)
-		{
-			if (String.IsNullOrEmpty(permission) || RealHasPermission(permission))
+        {
+	        bool negated = false;
+			if (String.IsNullOrEmpty(permission) || (RealHasPermission(permission, ref negated) && !negated))
 			{
 				return true;
 			}
+
+	        if (negated)
+		        return false;
+
 			string[] nodes = permission.Split('.');
 			for (int i = nodes.Length - 1; i >= 0; i--)
 			{
 				nodes[i] = "*";
-				if (RealHasPermission(String.Join(".", nodes, 0, i + 1)))
+				if (RealHasPermission(String.Join(".", nodes, 0, i + 1), ref negated))
 				{
-					return true;
+					return !negated;
 				}
 			}
 			return false;
 		}
-        private bool RealHasPermission(string permission)
+        private bool RealHasPermission(string permission, ref bool negated)
         {
+	        negated = false;
             if (string.IsNullOrEmpty(permission))
                 return true;
 
@@ -198,13 +199,16 @@ namespace TShockAPI
             var traversed = new List<Group>();
             while (cur != null)
             {
-                if (cur.negatedpermissions.Contains(permission))
-                    return false;
-                if (cur.permissions.Contains(permission))
+	            if (cur.negatedpermissions.Contains(permission))
+	            {
+		            negated = true;
+		            return false;
+	            }
+	            if (cur.permissions.Contains(permission))
                     return true;
                 if (traversed.Contains(cur))
                 {
-                    throw new Exception("Infinite group parenting ({0})".SFormat(cur.Name));
+                    throw new InvalidOperationException("Infinite group parenting ({0})".SFormat(cur.Name));
                 }
                 traversed.Add(cur);
                 cur = cur.Parent;
@@ -271,6 +275,26 @@ namespace TShockAPI
 			}
 			permissions.Remove(permission);
 		}
+
+		/// <summary>
+    /// Assigns all fields of this instance to another.
+    /// </summary>
+    /// <param name="otherGroup">The other instance.</param>
+		public void AssignTo(Group otherGroup)
+		{
+			otherGroup.Name = Name;
+			otherGroup.Parent = Parent;
+			otherGroup.Prefix = Prefix;
+			otherGroup.Suffix = Suffix;
+			otherGroup.R = R;
+			otherGroup.G = G;
+			otherGroup.B = B;
+			otherGroup.Permissions = Permissions;
+		}
+
+		public override string ToString() {
+			return this.Name;
+		}
 	}
 
     /// <summary>
@@ -278,6 +302,10 @@ namespace TShockAPI
     /// </summary>
 	public class SuperAdminGroup : Group
 	{
+		public override List<string> TotalPermissions
+		{
+			get { return new List<string> { "*" }; }
+		}
 		public SuperAdminGroup()
 			: base("superadmin")
 		{

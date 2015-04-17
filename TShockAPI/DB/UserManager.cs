@@ -1,6 +1,6 @@
 ﻿/*
 TShock, a server mod for Terraria
-Copyright (C) 2011-2012 The TShock Team
+Copyright (C) 2011-2015 Nyx Studios (fka. The TShock Team)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -15,9 +15,10 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 using System;
+using System.CodeDom.Compiler;
 using System.Data;
-using System.IO;
 using System.Collections.Generic;
 using System.Linq;
 using MySql.Data.MySqlClient;
@@ -37,14 +38,17 @@ namespace TShockAPI.DB
 			                         new SqlColumn("ID", MySqlDbType.Int32) {Primary = true, AutoIncrement = true},
 			                         new SqlColumn("Username", MySqlDbType.VarChar, 32) {Unique = true},
 			                         new SqlColumn("Password", MySqlDbType.VarChar, 128),
+                                     new SqlColumn("UUID", MySqlDbType.VarChar, 128),
 			                         new SqlColumn("Usergroup", MySqlDbType.Text),
-			                         new SqlColumn("IP", MySqlDbType.VarChar, 16)
+									 new SqlColumn("Registered", MySqlDbType.Text),
+                                     new SqlColumn("LastAccessed", MySqlDbType.Text),
+                                     new SqlColumn("KnownIPs", MySqlDbType.Text)
 				);
 			var creator = new SqlTableCreator(db,
 			                                  db.GetSqlType() == SqlType.Sqlite
 			                                  	? (IQueryBuilder) new SqliteQueryCreator()
 			                                  	: new MysqlQueryCreator());
-			creator.EnsureExists(table);
+			creator.EnsureTableStructure(table);
 		}
 
 		/// <summary>
@@ -59,8 +63,8 @@ namespace TShockAPI.DB
 			int ret;
 			try
 			{
-				ret = database.Query("INSERT INTO Users (Username, Password, UserGroup, IP) VALUES (@0, @1, @2, @3);", user.Name,
-								   TShock.Utils.HashPassword(user.Password), user.Group, user.Address);
+				ret = database.Query("INSERT INTO Users (Username, Password, UUID, UserGroup, Registered) VALUES (@0, @1, @2, @3, @4);", user.Name,
+								   TShock.Utils.HashPassword(user.Password), user.UUID, user.Group, DateTime.UtcNow.ToString("s"));
 			}
 			catch (Exception ex)
 			{
@@ -72,6 +76,8 @@ namespace TShockAPI.DB
 
 			if (1 > ret)
 				throw new UserExistsException(user.Name);
+
+			Hooks.AccountHooks.OnAccountCreate(user);
 		}
 
 		/// <summary>
@@ -82,25 +88,19 @@ namespace TShockAPI.DB
 		{
 			try
 			{
-				int affected = -1;
-				if (!string.IsNullOrEmpty(user.Address))
-				{
-					affected = database.Query("DELETE FROM Users WHERE IP=@0", user.Address);
-				}
-				else
-				{
-					affected = database.Query("DELETE FROM Users WHERE Username=@0", user.Name);
-				}
+				var tempuser = GetUser(user);
+				int affected = database.Query("DELETE FROM Users WHERE Username=@0", user.Name);
 
 				if (affected < 1)
-					throw new UserNotExistException(string.IsNullOrEmpty(user.Address) ? user.Name : user.Address);
+					throw new UserNotExistException(user.Name);
+
+				Hooks.AccountHooks.OnAccountDelete(tempuser);
 			}
 			catch (Exception ex)
 			{
 				throw new UserManagerException("RemoveUser SQL returned an error", ex);
 			}
 		}
-
 
 		/// <summary>
 		/// Sets the Hashed Password for a given username
@@ -119,6 +119,26 @@ namespace TShockAPI.DB
 			catch (Exception ex)
 			{
 				throw new UserManagerException("SetUserPassword SQL returned an error", ex);
+			}
+		}
+
+		/// <summary>
+		/// Sets the UUID for a given username
+		/// </summary>
+		/// <param name="user">User user</param>
+		/// <param name="group">string uuid</param>
+		public void SetUserUUID(User user, string uuid)
+		{
+			try
+			{
+				if (
+					database.Query("UPDATE Users SET UUID = @0 WHERE Username = @1;", uuid,
+								   user.Name) == 0)
+					throw new UserNotExistException(user.Name);
+			}
+			catch (Exception ex)
+			{
+				throw new UserManagerException("SetUserUUID SQL returned an error", ex);
 			}
 		}
 
@@ -150,6 +170,19 @@ namespace TShockAPI.DB
 			}
 		}
 
+	    public void UpdateLogin(User user)
+	    {
+            try
+            {
+                if (database.Query("UPDATE Users SET LastAccessed = @0, KnownIps = @1 WHERE Username = @2;", DateTime.UtcNow.ToString("s"), user.KnownIps, user.Name) == 0)
+                    throw new UserNotExistException(user.Name);
+            }
+            catch (Exception ex)
+            {
+                throw new UserManagerException("UpdateLogin SQL returned an error", ex);
+            }
+	    }
+
 		public int GetUserID(string username)
 		{
 			try
@@ -164,57 +197,10 @@ namespace TShockAPI.DB
 			}
 			catch (Exception ex)
 			{
-				Log.ConsoleError("FetchHashedPasswordAndGroup SQL returned an error: " + ex);
+				TShock.Log.ConsoleError("FetchHashedPasswordAndGroup SQL returned an error: " + ex);
 			}
 			return -1;
 		}
-
-		/// <summary>
-		/// Returns a Group for a ip from the database
-		/// </summary>
-		/// <param name="ply">string ip</param>
-		public Group GetGroupForIP(string ip)
-		{
-			try
-			{
-				using (var reader = database.QueryReader("SELECT * FROM Users WHERE IP=@0", ip))
-				{
-					if (reader.Read())
-					{
-						string group = reader.Get<string>("UserGroup");
-						return TShock.Utils.GetGroup(group);
-					}
-				}
-			}
-			catch (Exception ex)
-			{
-				Log.ConsoleError("GetGroupForIP SQL returned an error: " + ex);
-			}
-			return TShock.Utils.GetGroup(TShock.Config.DefaultGuestGroupName);
-		}
-
-		public Group GetGroupForIPExpensive(string ip)
-		{
-			try
-			{
-				using (var reader = database.QueryReader("SELECT IP, UserGroup FROM Users"))
-				{
-					while (reader.Read())
-					{
-						if (TShock.Utils.GetIPv4Address(reader.Get<string>("IP")) == ip)
-						{
-							return TShock.Utils.GetGroup(reader.Get<string>("UserGroup"));
-						}
-					}
-				}
-			}
-			catch (Exception ex)
-			{
-				Log.ConsoleError("GetGroupForIP SQL returned an error: " + ex);
-			}
-			return TShock.Utils.GetGroup(TShock.Config.DefaultGuestGroupName);
-		}
-
 
 		public User GetUserByName(string name)
 		{
@@ -240,18 +226,6 @@ namespace TShockAPI.DB
 			}
 		}
 
-		public User GetUserByIP(string ip)
-		{
-			try
-			{
-				return GetUser(new User {Address = ip});
-			}
-			catch (UserManagerException)
-			{
-				return null;
-			}
-		}
-
 		public User GetUser(User user)
 		{
 			bool multiple = false;
@@ -264,17 +238,11 @@ namespace TShockAPI.DB
 				arg = user.ID;
 				type = "id";
 			}
-			else if (string.IsNullOrEmpty(user.Address))
+			else
 			{
 				query = "SELECT * FROM Users WHERE Username=@0";
 				arg = user.Name;
 				type = "name";
-			}
-			else
-			{
-				query = "SELECT * FROM Users WHERE IP=@0";
-				arg = user.Address;
-				type = "ip";
 			}
 
 			try
@@ -298,7 +266,7 @@ namespace TShockAPI.DB
 			if (multiple)
 				throw new UserManagerException(String.Format("Multiple users found for {0} '{1}'", type, arg));
 
-			throw new UserNotExistException(string.IsNullOrEmpty(user.Address) ? user.Name : user.Address);
+			throw new UserNotExistException(user.Name);
 		}
 
 		public List<User> GetUsers()
@@ -317,7 +285,7 @@ namespace TShockAPI.DB
 			}
 			catch (Exception ex)
 			{
-				Log.Error(ex.ToString());
+				TShock.Log.Error(ex.ToString());
 			}
 			return null;
 		}
@@ -327,8 +295,11 @@ namespace TShockAPI.DB
 			user.ID = result.Get<int>("ID");
 			user.Group = result.Get<string>("Usergroup");
 			user.Password = result.Get<string>("Password");
+            user.UUID = result.Get<string>("UUID");
 			user.Name = result.Get<string>("Username");
-			user.Address = result.Get<string>("IP");
+			user.Registered = result.Get<string>("Registered");
+            user.LastAccessed = result.Get<string>("LastAccessed");
+            user.KnownIps = result.Get<string>("KnownIps");
 			return user;
 		}
 	}
@@ -338,23 +309,32 @@ namespace TShockAPI.DB
 		public int ID { get; set; }
 		public string Name { get; set; }
 		public string Password { get; set; }
+        public string UUID { get; set; }
 		public string Group { get; set; }
-		public string Address { get; set; }
+		public string Registered { get; set; }
+        public string LastAccessed { get; set; }
+        public string KnownIps { get; set; }
 
-		public User(string ip, string name, string pass, string group)
+		public User(string name, string pass, string uuid, string group, string registered, string last, string known)
 		{
-			Address = ip;
 			Name = name;
 			Password = pass;
+            UUID = uuid;
 			Group = group;
+			Registered = registered;
+		    LastAccessed = last;
+		    KnownIps = known;
 		}
 
 		public User()
 		{
-			Address = "";
 			Name = "";
 			Password = "";
+            UUID = "";
 			Group = "";
+			Registered = "";
+            LastAccessed = "";
+            KnownIps = "";
 		}
 	}
 

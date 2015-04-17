@@ -1,6 +1,6 @@
 ﻿/*
 TShock, a server mod for Terraria
-Copyright (C) 2011-2012 The TShock Team
+Copyright (C) 2011-2015 Nyx Studios (fka. The TShock Team)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -15,6 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -36,8 +37,31 @@ namespace Rests
 	/// <param name="parameters">Parameters in the url</param>
 	/// <param name="verbs">{x} in urltemplate</param>
 	/// <returns>Response object or null to not handle request</returns>
-	public delegate object RestCommandD(RestVerbs verbs, IParameterCollection parameters);
+	public delegate object RestCommandD(RestRequestArgs args);
 
+	public class RestRequestArgs
+	{
+		public RestVerbs Verbs { get; private set; }
+		public IParameterCollection Parameters { get; private set; }
+		public IRequest Request { get; private set; }
+		public SecureRest.TokenData TokenData { get; private set; }
+
+		public RestRequestArgs(RestVerbs verbs, IParameterCollection param, IRequest request)
+		{
+			Verbs = verbs;
+			Parameters = param;
+			Request = request;
+			TokenData = SecureRest.TokenData.None;
+		}
+
+		public RestRequestArgs(RestVerbs verbs, IParameterCollection param, IRequest request, SecureRest.TokenData tokenData)
+		{
+			Verbs = verbs;
+			Parameters = param;
+			Request = request;
+			TokenData = tokenData;
+		}
+	}
 	public class Rest : IDisposable
 	{
 		private readonly List<RestCommand> commands = new List<RestCommand>();
@@ -131,9 +155,10 @@ namespace Rests
 				str = string.Format("{0}({1});", jsonp, str);
 			}
 			e.Response.Connection.Type = ConnectionType.Close;
-			e.Response.ContentType = new ContentTypeHeader("application/json");
+			e.Response.ContentType = new ContentTypeHeader("application/json; charset=utf-8");
 			e.Response.Add(serverHeader);
-			e.Response.Body.Write(Encoding.ASCII.GetBytes(str), 0, str.Length);
+			var bytes = Encoding.UTF8.GetBytes(str);
+			e.Response.Body.Write(bytes, 0, bytes.Length);
 			e.Response.Status = HttpStatusCode.OK;
 		}
 
@@ -163,31 +188,56 @@ namespace Rests
 						continue;
 					}
 
-					var obj = ExecuteCommand(com, verbs, e.Request.Parameters);
+					var obj = ExecuteCommand(com, verbs, e.Request.Parameters, e.Request);
 					if (obj != null)
 						return obj;
 				}
 			}
 			catch (Exception exception)
 			{
-				return new Dictionary<string, string>
+				return new RestObject("500")
 				       	{
-				       		{"status", "500"},
 				       		{"error", "Internal server error."},
 				       		{"errormsg", exception.Message},
 				       		{"stacktrace", exception.StackTrace},
 				       	};
 			}
-			return new Dictionary<string, string>
+			return new RestObject("404")
 			       	{
-			       		{"status", "404"},
 			       		{"error", "Specified API endpoint doesn't exist. Refer to the documentation for a list of valid endpoints."}
 			       	};
 		}
 
-		protected virtual object ExecuteCommand(RestCommand cmd, RestVerbs verbs, IParameterCollection parms)
+		protected virtual object ExecuteCommand(RestCommand cmd, RestVerbs verbs, IParameterCollection parms, IRequest request)
 		{
-			return cmd.Callback(verbs, parms);
+			object result = cmd.Execute(verbs, parms, request);
+			if (cmd.DoLog && TShock.Config.LogRest)
+			{
+				TShock.Log.ConsoleInfo("Anonymous requested REST endpoint: " + BuildRequestUri(cmd, verbs, parms, false));
+			}
+
+			return result;
+		}
+
+		protected virtual string BuildRequestUri(
+			RestCommand cmd, RestVerbs verbs, IParameterCollection parms, bool includeToken = true
+		) {
+			StringBuilder requestBuilder = new StringBuilder(cmd.UriTemplate);
+			char separator = '?';
+			foreach (IParameter paramImpl in parms)
+			{
+				Parameter param = (paramImpl as Parameter);
+				if (param == null || (!includeToken && param.Name.Equals("token", StringComparison.InvariantCultureIgnoreCase)))
+					continue;
+
+				requestBuilder.Append(separator);
+				requestBuilder.Append(param.Name);
+				requestBuilder.Append('=');
+				requestBuilder.Append(param.Value);
+				separator = '&';
+			}
+			
+			return requestBuilder.ToString();
 		}
 
 		#region Dispose

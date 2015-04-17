@@ -1,6 +1,6 @@
 ﻿/*
 TShock, a server mod for Terraria
-Copyright (C) 2011-2012 The TShock Team
+Copyright (C) 2011-2015 Nyx Studios (fka. The TShock Team)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -15,15 +15,17 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 using System;
 using System.IO;
 using System.IO.Streams;
 using System.Text;
+using Terraria;
 
 namespace TShockAPI.Net
 {
 	[Flags]
-	public enum WorldInfoFlag : byte
+	public enum BossFlags : byte
 	{
 		None = 0,
 		OrbSmashed = 1,
@@ -31,7 +33,23 @@ namespace TShockAPI.Net
 		DownedBoss2 = 4,
 		DownedBoss3 = 8,
 		HardMode = 16,
-		DownedClown = 32
+		DownedClown = 32,
+		ServerSideCharacter = 64,
+		DownedPlantBoss = 128
+	}
+
+	[Flags]
+	public enum BossFlags2 : byte
+	{
+		None = 0,
+		DownedMechBoss1 = 1,
+		DownedMechBoss2 = 2,
+		DownedMechBoss3 = 4,
+		DownedMechBossAny = 8,
+		CloudBg = 16,
+		Crimson = 32,
+		PumpkinMoon = 64,
+		SnowMoon = 128
 	}
 
 	public class WorldInfoMsg : BaseMsg
@@ -40,14 +58,45 @@ namespace TShockAPI.Net
 		public bool DayTime { get; set; }
 		public byte MoonPhase { get; set; }
 		public bool BloodMoon { get; set; }
-		public int MaxTilesX { get; set; }
-		public int MaxTilesY { get; set; }
-		public int SpawnX { get; set; }
-		public int SpawnY { get; set; }
-		public int WorldSurface { get; set; }
-		public int RockLayer { get; set; }
+		public bool Eclipse { get; set; }
+		public short MaxTilesX { get; set; }
+		public short MaxTilesY { get; set; }
+		public short SpawnX { get; set; }
+		public short SpawnY { get; set; }
+		public short WorldSurface { get; set; }
+		public short RockLayer { get; set; }
 		public int WorldID { get; set; }
-		public WorldInfoFlag WorldFlags { get; set; }
+		public byte MoonType { get; set; }
+		public int TreeX0 { get; set; }
+		public int TreeX1 { get; set; }
+		public int TreeX2 { get; set; }
+		public byte TreeStyle0 { get; set; }
+		public byte TreeStyle1 { get; set; }
+		public byte TreeStyle2 { get; set; }
+		public byte TreeStyle3 { get; set; }
+		public int CaveBackX0 { get; set; }
+		public int CaveBackX1 { get; set; }
+		public int CaveBackX2 { get; set; }
+		public byte CaveBackStyle0 { get; set; }
+		public byte CaveBackStyle1 { get; set; }
+		public byte CaveBackStyle2 { get; set; }
+		public byte CaveBackStyle3 { get; set; }
+		public byte SetBG0 { get; set; }
+		public byte SetBG1 { get; set; }
+		public byte SetBG2 { get; set; }
+		public byte SetBG3 { get; set; }
+		public byte SetBG4 { get; set; }
+		public byte SetBG5 { get; set; }
+		public byte SetBG6 { get; set; }
+		public byte SetBG7 { get; set; }
+		public byte IceBackStyle { get; set; }
+		public byte JungleBackStyle { get; set; }
+		public byte HellBackStyle { get; set; }
+		public float WindSpeed { get; set; }
+		public byte NumberOfClouds { get; set; }
+		public BossFlags BossFlags { get; set; }
+		public BossFlags2 BossFlags2 { get; set; }
+		public float Rain { get; set; }
 		public string WorldName { get; set; }
 
 		public override PacketTypes ID
@@ -57,19 +106,71 @@ namespace TShockAPI.Net
 
 		public override void Pack(Stream stream)
 		{
-			stream.WriteInt32(Time);
-			stream.WriteBoolean(DayTime);
-			stream.WriteInt8(MoonPhase);
-			stream.WriteBoolean(BloodMoon);
-			stream.WriteInt32(MaxTilesX);
-			stream.WriteInt32(MaxTilesY);
-			stream.WriteInt32(SpawnX);
-			stream.WriteInt32(SpawnY);
-			stream.WriteInt32(WorldSurface);
-			stream.WriteInt32(RockLayer);
-			stream.WriteInt32(WorldID);
-			stream.WriteInt8((byte) WorldFlags);
-			stream.WriteBytes(Encoding.UTF8.GetBytes(WorldName));
+			BinaryWriter writer = new BinaryWriter(stream);
+			writer.Write(Time);
+			BitsByte worldinfo = new BitsByte(DayTime, BloodMoon, Eclipse);
+			writer.Write(worldinfo);
+			writer.Write(MoonPhase);
+			writer.Write(MaxTilesX);
+			writer.Write(MaxTilesY);
+			writer.Write(SpawnX);
+			writer.Write(SpawnY);
+			writer.Write(WorldSurface);
+			writer.Write(RockLayer);
+			writer.Write(WorldID);
+			writer.Write(WorldName);
+			writer.Write(MoonType);
+
+			writer.Write(SetBG0);
+			writer.Write(SetBG1);
+			writer.Write(SetBG2);
+			writer.Write(SetBG3);
+			writer.Write(SetBG4);
+			writer.Write(SetBG5);
+			writer.Write(SetBG6);
+			writer.Write(SetBG7);
+			writer.Write(IceBackStyle);
+			writer.Write(JungleBackStyle);
+			writer.Write(HellBackStyle);
+			writer.Write(WindSpeed);
+			writer.Write(NumberOfClouds);
+
+			writer.Write(TreeX0);
+			writer.Write(TreeX1);
+			writer.Write(TreeX2);
+			writer.Write(TreeStyle0);
+			writer.Write(TreeStyle1);
+			writer.Write(TreeStyle2);
+			writer.Write(TreeStyle3);
+			writer.Write(CaveBackX0);
+			writer.Write(CaveBackX1);
+			writer.Write(CaveBackX2);
+			writer.Write(CaveBackStyle0);
+			writer.Write(CaveBackStyle1);
+			writer.Write(CaveBackStyle2);
+			writer.Write(CaveBackStyle3);
+
+			writer.Write(Rain);
+
+			BitsByte bosses1 = new BitsByte((BossFlags & BossFlags.OrbSmashed) == BossFlags.OrbSmashed,
+				(BossFlags & BossFlags.DownedBoss1) == BossFlags.DownedBoss1,
+				(BossFlags & BossFlags.DownedBoss2) == BossFlags.DownedBoss2,
+				(BossFlags & BossFlags.DownedBoss3) == BossFlags.DownedBoss3,
+				(BossFlags & BossFlags.HardMode) == BossFlags.HardMode,
+				(BossFlags & BossFlags.DownedClown) == BossFlags.DownedClown,
+				(BossFlags & BossFlags.ServerSideCharacter) == BossFlags.ServerSideCharacter,
+				(BossFlags & BossFlags.DownedPlantBoss) == BossFlags.DownedPlantBoss);
+			writer.Write(bosses1);
+
+			BitsByte bosses2 = new BitsByte((BossFlags2 & BossFlags2.DownedMechBoss1) == BossFlags2.DownedMechBoss1,
+				(BossFlags2 & BossFlags2.DownedMechBoss2) == BossFlags2.DownedMechBoss2,
+				(BossFlags2 & BossFlags2.DownedMechBoss3) == BossFlags2.DownedMechBoss3,
+				(BossFlags2 & BossFlags2.DownedMechBossAny) == BossFlags2.DownedMechBossAny,
+				(BossFlags2 & BossFlags2.CloudBg) == BossFlags2.CloudBg,
+				(BossFlags2 & BossFlags2.Crimson) == BossFlags2.Crimson,
+				(BossFlags2 & BossFlags2.PumpkinMoon) == BossFlags2.PumpkinMoon,
+				(BossFlags2 & BossFlags2.SnowMoon) == BossFlags2.SnowMoon);
+			writer.Write(bosses2);
 		}
 	}
 }

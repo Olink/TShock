@@ -1,6 +1,6 @@
 ﻿/*
 TShock, a server mod for Terraria
-Copyright (C) 2011-2012 The TShock Team
+Copyright (C) 2011-2015 Nyx Studios (fka. The TShock Team)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -15,10 +15,10 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+
 using System;
 using System.Collections.Generic;
 using System.Data;
-using System.IO;
 using System.Linq;
 using MySql.Data.MySqlClient;
 
@@ -41,7 +41,7 @@ namespace TShockAPI.DB
 			                                  db.GetSqlType() == SqlType.Sqlite
 			                                  	? (IQueryBuilder) new SqliteQueryCreator()
 			                                  	: new MysqlQueryCreator());
-			creator.EnsureExists(table);
+			creator.EnsureTableStructure(table);
 			UpdateItemBans();
 		}
 
@@ -71,7 +71,7 @@ namespace TShockAPI.DB
 			}
 			catch (Exception ex)
 			{
-				Log.Error(ex.ToString());
+				TShock.Log.Error(ex.ToString());
 			}
 		}
 
@@ -86,7 +86,7 @@ namespace TShockAPI.DB
 			}
 			catch (Exception ex)
 			{
-				Log.Error(ex.ToString());
+				TShock.Log.Error(ex.ToString());
 			}
 		}
 
@@ -101,12 +101,8 @@ namespace TShockAPI.DB
 
 		public bool ItemIsBanned(string name, TSPlayer ply)
 		{
-			if (ItemBans.Contains(new ItemBan(name)))
-			{
-				ItemBan b = GetItemBanByName(name);
-				return !b.HasPermissionToUseItem(ply);
-			}
-			return false;
+			ItemBan b = GetItemBanByName(name);
+			return b != null &&!b.HasPermissionToUseItem(ply);
 		}
 
 		public bool AllowGroup(string item, string name)
@@ -130,7 +126,7 @@ namespace TShockAPI.DB
 				}
 				catch (Exception ex)
 				{
-					Log.Error(ex.ToString());
+					TShock.Log.Error(ex.ToString());
 				}
 			}
 
@@ -154,7 +150,7 @@ namespace TShockAPI.DB
 				}
 				catch (Exception ex)
 				{
-					Log.Error(ex.ToString());
+					TShock.Log.Error(ex.ToString());
 				}
 			}
 			return false;
@@ -162,11 +158,11 @@ namespace TShockAPI.DB
 
 		public ItemBan GetItemBanByName(String name)
 		{
-			foreach (ItemBan b in ItemBans)
+			for (int i = 0; i < ItemBans.Count; i++)
 			{
-				if (b.Name == name)
+				if (ItemBans[i].Name == name)
 				{
-					return b;
+					return ItemBans[i];
 				}
 			}
 			return null;
@@ -196,13 +192,32 @@ namespace TShockAPI.DB
 			return Name == other.Name;
 		}
 
-		public bool HasPermissionToUseItem(TSPlayer ply)
-		{
-			if (ply == null)
-				return false;
-			return AllowedGroups.Contains(ply.Group.Name);
-				// could add in the other permissions in this class instead of a giant if switch.
-		}
+        public bool HasPermissionToUseItem(TSPlayer ply)
+        {
+            if (ply == null)
+                return false;
+
+	        if (ply.Group.HasPermission(Permissions.usebanneditem))
+		        return true;
+
+            var cur = ply.Group;
+            var traversed = new List<Group>();
+            while (cur != null)
+            {
+                if (AllowedGroups.Contains(cur.Name))
+                {
+                    return true;
+                }
+                if (traversed.Contains(cur))
+                {
+                    throw new InvalidOperationException("Infinite group parenting ({0})".SFormat(cur.Name));
+                }
+                traversed.Add(cur);
+                cur = cur.Parent;
+            }
+            return false;
+            // could add in the other permissions in this class instead of a giant if switch.
+        }
 
 		public void SetAllowedGroups(String groups)
 		{
